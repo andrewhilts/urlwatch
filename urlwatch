@@ -90,6 +90,9 @@ import datetime
 import optparse
 import logging
 import imp
+import ssl
+import smtplib
+from email.mime.text import MIMEText
 
 # Python 3.2 includes "concurrent.futures", for older versions,
 # use "pip install futures" or http://code.google.com/p/pythonfutures/
@@ -163,6 +166,9 @@ if __name__ == '__main__':
     parser.add_option('-t', '--mailto', dest='email', metavar='ADDRESS', help='Send results via e-mail to ADDRESS')
     parser.add_option('-f', '--mailfrom', dest='email_from', metavar='ADDRESS', help='Alternate From: address for e-mail (--mailto)')
     parser.add_option('-s', '--smtp', dest='email_smtp', metavar='SERVER', help='SMTP server for e-mail (--mailto)')
+    parser.add_option('-x', '--ssl', dest='email_ssl', metavar='USESSL', help='Use SSL connection for e-mail server (--mailto)')
+    parser.add_option('-u', '--username', dest='email_username', metavar='EMAILUSER', help='Use username for email sending (--mailto)')
+    parser.add_option('-p', '--password', dest='email_password', metavar='EMAILPASSWORD', help='Use password for email sending (--mailto)')
 
     parser.set_defaults(verbose=False, display_errors=False)
 
@@ -187,6 +193,18 @@ if __name__ == '__main__':
         email_smtp_server = options.email_smtp or 'localhost'
         email_sender_address = options.email_from or options.email
         email_receiver_address = options.email
+        email_port = 587
+        if options.email_ssl:
+            email_port = 465
+            enable_email_ssl = True;
+        else:
+            enable_email_ssl = False;
+        if options.email_password:
+            email_username = options.email_username or options.email_from
+            email_password = options.email_password
+            enable_email_auth = True;
+        else:
+            enable_email_auth = False;
     else:
         if options.email_from:
             log.error('--mailfrom without --mailto')
@@ -297,7 +315,6 @@ if __name__ == '__main__':
                         isinstance(data, unicode)):
                     # Fix for Python 2's unicode/str woes
                     data = data.encode('utf-8')
-
                 timestamp_old = email.utils.formatdate(timestamp, localtime=1)
                 timestamp_new = email.utils.formatdate(time.time(), localtime=1)
                 diff = ''.join(difflib.unified_diff(\
@@ -380,13 +397,19 @@ if __name__ == '__main__':
 
         if enable_emails:
             try:
-                subject = 'Changes detected (%d)' % len(summary)
-                mailer.send(email_smtp_server, email_sender_address,
-                        email_receiver_address, subject,
-                        short_summary + '\n' + '\n'.join(details))
+                msg = MIMEText(short_summary + '\n' + '\n'.join(details), 'plain')
+                msg['Subject'] = 'URL watch update. Changes detected (%d)' % len(summary)
+                msg['From'] = email_sender_address
+                if enable_email_ssl:
+                    smtpObj = smtplib.SMTP_SSL(email_smtp_server, port=email_port)
+                else:
+                    smtplib.SMTP(email_smtp_server, port=email_port)
+                if enable_email_auth:
+                    smtpObj.login(email_username, email_password)
+                smtpObj.sendmail(email_sender_address, email_receiver_address, msg.as_string())
+                smtpObj.quit()
                 log.info('E-Mail to %s sent.', email_receiver_address)
             except Exception, e:
                 log.warning('E-Mail delivery error: %s', e)
     else:
         log.info('no details collected - not printing')
-
